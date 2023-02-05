@@ -1,0 +1,22 @@
+version: "3.8"
+
+services:
+  docker-app1:
+    image: ddave008/dkdave:dkdaveapp1
+    ports:
+      - "5000:5000"
+    volumes:
+      - ".:/usr/src/"
+    container_name: app1
+    networks:
+      - deep
+  docker-app2:
+    image: ddave008/dkdave:dkdaveapp2
+    volumes:
+      - ".:/usr/src/"
+    container_name: app2
+    networks:
+      - deep
+networks:
+  deep:
+    driver: bridge
