@@ -1,0 +1,57 @@
+{
+  "StartAt": "Select Queue URL",
+  "States": {
+    "Select Queue URL": {
+      "Type": "Choice",
+      "Choices": [
+        {
+          "Variable": "$.type",
+          "StringEquals": "CONNECT",
+          "Next": "Send to Connect Queue"
+        },
+        {
+          "Variable": "$.type",
+          "StringEquals": "SUBSCRIBE",
+          "Next": "Send to Subscribe Queue"
+        },
+        {
+          "Variable": "$.type",
+          "StringEquals": "PUBLISH",
+          "Next": "Send to Publish Queue"
+        }
+      ],
+      "Default": "Invalid Request"
+    },
+    "Invalid Request": {
+      "Type": "Fail",
+      "Cause": "Invalid request type"
+    },
+    "Send to Connect Queue": {
+      "Type": "Task",
+      "Resource": "arn:aws:states:::sqs:sendMessage",
+      "Parameters": {
+        "QueueUrl": "https://sqs.us-east-1.amazonaws.com/319594468398/connect_queue",
+        "MessageBody.$": "$"
+      },
+      "End": true
+    },
+    "Send to Subscribe Queue": {
+      "Type": "Task",
+      "Resource": "arn:aws:states:::sqs:sendMessage",
+      "Parameters": {
+        "QueueUrl": "https://sqs.us-east-1.amazonaws.com/319594468398/subscribe_queue",
+        "MessageBody.$": "$"
+      },
+      "End": true
+    },
+    "Send to Publish Queue": {
+      "Type": "Task",
+      "Resource": "arn:aws:states:::sqs:sendMessage",
+      "Parameters": {
+        "QueueUrl": "https://sqs.us-east-1.amazonaws.com/319594468398/publish_queue",
+        "MessageBody.$": "$"
+      },
+      "End": true
+    }
+  }
+}
