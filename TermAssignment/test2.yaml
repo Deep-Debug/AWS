@@ -1,0 +1,279 @@
+AWSTemplateFormatVersion : 2010-09-09
+Resources:
+  FaceDataDynamoDb: 
+    Type: AWS::DynamoDB::Table 
+    Properties: 
+      TableName: "facedata" 
+      AttributeDefinitions: 
+        - AttributeName: "FullName" 
+          AttributeType: "S" 
+      AttributeDefinitions: 
+        - AttributeName: "RekognitionId" 
+          AttributeType: "S" 
+      KeySchema: 
+        - AttributeName: "RekognitionId" 
+          KeyType: "HASH" 
+      ProvisionedThroughput: 
+        ReadCapacityUnits: "5" 
+        WriteCapacityUnits: "5" 
+  StudentDataDynamoDb: 
+    Type: AWS::DynamoDB::Table 
+    Properties: 
+      TableName: "studentdata" 
+      AttributeDefinitions: 
+        - AttributeName: "number" 
+          AttributeType: "S" 
+      AttributeDefinitions: 
+        - AttributeName: "name" 
+          AttributeType: "S" 
+      AttributeDefinitions: 
+        - AttributeName: "email" 
+          AttributeType: "S" 
+      AttributeDefinitions: 
+        - AttributeName: "id" 
+          AttributeType: "S" 
+      KeySchema: 
+        - AttributeName: "id" 
+          KeyType: "HASH" 
+      ProvisionedThroughput: 
+        ReadCapacityUnits: "5" 
+        WriteCapacityUnits: "5" 
+  MyCollection: 
+    Type: AWS::Rekognition::Collection 
+    Properties: 
+      CollectionId: demo_1 
+  DeepEC2: 
+    Type: "AWS::EC2::Instance" 
+    Properties: 
+      InstanceType: "t2.micro" 
+      ImageId: "ami-0c94855ba95c71c99" # Amazon Linux 2 AMI (latest) 
+      KeyName: "deep" 
+      SecurityGroups: 
+        - Ref: DeepSecurityGroup 
+      Tags: 
+        - Key: "Name" 
+          Value: "DeepEC2" 
+  DeepSecurityGroup: 
+    Type: "AWS::EC2::SecurityGroup" 
+    Properties: 
+      GroupDescription: "Security group for DeepEC2" 
+      SecurityGroupIngress: 
+        - IpProtocol: tcp 
+          FromPort: 5000 
+          ToPort: 5000 
+          CidrIp: 0.0.0.0/0 
+        - IpProtocol: tcp 
+          FromPort: 8000 
+          ToPort: 8000 
+          CidrIp: 0.0.0.0/0 
+        - IpProtocol: tcp 
+          FromPort: 22 
+          ToPort: 22 
+          CidrIp: 0.0.0.0/0 
+        - IpProtocol: tcp 
+          FromPort: 443 
+          ToPort: 443 
+          CidrIp: 0.0.0.0/0 
+        - IpProtocol: tcp 
+          FromPort: 80 
+          ToPort: 80 
+          CidrIp: 0.0.0.0/0
+  Bucket:
+    Type: AWS::S3::Bucket
+    DependsOn:
+      - ProcessingLambdaPermission
+    Properties:
+      BucketName: "videodemodeepfinalbucketfortheproject"
+      NotificationConfiguration:
+        LambdaConfigurations:
+          - Event: s3:ObjectCreated:*
+            Function: !GetAtt FaceDetectionLambdaFunction.Arn
+  ProcessingLambdaPermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      Action: 'lambda:InvokeFunction'
+      FunctionName: !Ref FaceDetectionLambdaFunction
+      Principal: s3.amazonaws.com
+      SourceArn: !Sub 'arn:aws:s3:::videodemodeepfinalbucketfortheproject'
+      SourceAccount: !Ref AWS::AccountId
+  FaceDetectionLambdaFunction:
+    Type: AWS::Lambda::Function
+    Properties:
+      Code:
+        ZipFile: |
+          from __future__ import print_function
+          import boto3
+          import json
+          import urllib
+          dynamodb = boto3.client('dynamodb')
+          s3 = boto3.client('s3')
+          rekognition = boto3.client('rekognition')
+          def get_faceId(bucket_name,key):
+              print("inside index call>>>>>>>>>>>>>>>>: ",key,bucket)
+              response = rekognition.index_faces(
+                  Image={"S3Object":
+                      {"Bucket": bucket_name, "Name":key}},
+                      CollectionId="demo_1")
+              return response
+              
+          def add_data_dynamoDB(table_name,face_id, person_name):
+              print("inside head call>>>>>>>>>>>>>>>>: ",tableName,faceId, fullName)
+              response = dynamodb.put_item(
+                  TableName=table_name,
+                  Item={
+                      'RekognitionId': {'S': faceId},
+                      'FullName': {'S': fullName}
+                      }
+                  )   
+          def lambda_handler(event, context):
+              bucket = event['Records'][0]['s3']['bucket']['name']
+              print("Records: ",event['Records'])
+              key = event['Records'][0]['s3']['object']['key']
+              print("KeyNew>>>>>>>>>>>>>>>>: ",key)
+              try:
+                  print("befier index call>>>>>>>>>>>>>>>>: ",key,bucket)
+                  response = get_faceId(bucket,key)
+                  print("after index call>>>>>>>>>>>>>>>>: ",key,bucket,">>>>>>>>",response)
+                  if response['ResponseMetadata']['HTTPStatusCode'] == 200:
+                      face_id = response['FaceRecords'][0]['Face']['FaceId']
+                      print("before head call>>>>>>>>>>>>>>>>: ",key,bucket)
+                      ret = s3.head_object(Bucket=bucket,Key=key)
+                      print("after head call>>>>>>>>>>>>>>>>: ",key,bucket,">>>>>>>>>>",ret)
+                      person_name = ret['Metadata']['fullname']
+                      print("before update call>>>>>>>>>>>>>>>>: ",key,bucket,">>>>>>>>>>",personFullName)
+                      add_data_dynamoDB('facedata',face_id,person_name)
+                      print("after update call>>>>>>>>>>>>>>>>: ",face_id,person_name)
+                  # Print response to console
+                  print(response)
+                  return response
+              except Exception as e:
+                  print(e)
+                  print("Error processing object {} from bucket {}. ".format(key, bucket))
+                  raise e
+      Handler: index.lambda_handler
+      Role: arn:aws:iam::319594468398:role/LabRole #Your own Lab Role
+      Runtime: python3.8
+      MemorySize: 512
+      Timeout: 120
+  S3Bucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: videodemotestimagesforfinalproject
+  MyS3BucketPolicy:
+    Type: AWS::S3::BucketPolicy
+    Properties:
+      PolicyDocument:
+        Statement:
+          - Action:
+              - s3:GetObject
+            Effect: Allow
+            Resource: !Sub "arn:aws:s3:::${S3Bucket}/*"
+            Principal: "*"
+      Bucket: !Ref S3Bucket
+  LambdaFunction1:
+    Type: AWS::Lambda::Function
+    Properties:
+      Code:
+        ZipFile: |
+          import boto3
+          import random
+          s3 = boto3.resource('s3')
+          BUCKET_NAME = 'videodemotestimagesforfinalproject'
+          def lambda_handler(event, context):
+              bucket_name = 'videodemotestimagesforfinalproject'
+              bucket = s3.Bucket(bucket_name)
+              objects = list(bucket.objects.all())
+              random_object = random.choice(objects)
+              # Generate the object URL
+              object_url = f'https://{BUCKET_NAME}.s3.amazonaws.com/{random_object.key}'
+              # Return the object URL in the response
+              return {
+                  'statusCode': 200,
+                  'body': object_url
+              }
+      FunctionName: videodemoimagepickerlambdafromtestbucket
+      Handler: index.lambda_handler
+      Role: arn:aws:iam::319594468398:role/LabRole #Your own Lab Role
+      Runtime: python3.8
+      MemorySize: 512
+      Timeout: 120
+  SNSTopic1: 
+    Type: AWS::SNS::Topic
+    Properties: 
+      TopicName: "videodemodalsafenotify"
+  APIGatewayRestAPICreate:
+      Type: 'AWS::ApiGateway::RestApi'
+      Properties:
+        Name: imagePciker
+      DependsOn:
+      - LambdaFunction1
+  APIGatewayResourceCreate:
+      Type: 'AWS::ApiGateway::Resource'
+      Properties:
+        RestApiId: !Ref APIGatewayRestAPICreate
+        ParentId: !GetAtt
+          - APIGatewayRestAPICreate
+          - RootResourceId
+        PathPart: imagepicker
+      DependsOn:
+      - APIGatewayRestAPICreate
+  APIGatewayMethodCreate:
+      Type: 'AWS::ApiGateway::Method'
+      Properties:
+        RestApiId: !Ref APIGatewayRestAPICreate
+        ResourceId: !Ref APIGatewayResourceCreate
+        HttpMethod: POST
+        AuthorizationType: NONE
+        MethodResponses:
+          - StatusCode: 200
+            ResponseParameters:
+              method.response.header.Access-Control-Allow-Headers: false
+              method.response.header.Access-Control-Allow-Methods: false
+              method.response.header.Access-Control-Allow-Origin: false
+            ResponseModels:
+              application/json: 'Empty'
+        Integration:
+          Type: AWS
+          IntegrationResponses:
+            - StatusCode: 200
+              ResponseParameters:
+                method.response.header.Access-Control-Allow-Headers: "'*'"
+                method.response.header.Access-Control-Allow-Methods: "'OPTIONS,POST'"
+                method.response.header.Access-Control-Allow-Origin: "'*'"
+          IntegrationHttpMethod: POST
+          Uri: !Sub
+            - >-
+              arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${LambdaFuncNameArn}/invocations
+            - LambdaFuncNameArn: !GetAtt LambdaFunction1.Arn
+      DependsOn:
+        - APIGatewayResourceCreate
+  APIGatewayDeployment:
+      Type: 'AWS::ApiGateway::Deployment'
+      Properties:
+        RestApiId: !Ref APIGatewayRestAPICreate
+        StageName: dev
+      DependsOn:
+        - APIGatewayMethodCreate
+  APIGatewayPermissionCreate:
+      Type: 'AWS::Lambda::Permission'
+      Properties:
+        Action: 'lambda:InvokeFunction'
+        FunctionName: !GetAtt LambdaFunction1.Arn
+        Principal: apigateway.amazonaws.com
+      DependsOn:
+      - APIGatewayDeployment
+  MySecret:
+      Type: AWS::SecretsManager::Secret
+      Properties:
+        Name: ApiGateWay
+        Description: URL
+        SecretString: !Sub
+          - |
+            {
+              "Deployment": "${Deployment}",
+              "SNS": "${SNS}"
+            }
+          - {
+              Deployment: !Ref APIGatewayRestAPICreate,
+              SNS: !Ref SNSTopic1,
+            }
